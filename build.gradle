@@ -1,7 +1,14 @@
 plugins {
     id "idea"
-    id "com.android.library" apply false
-    id "org.jetbrains.kotlin.android" apply false
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.android.library) apply false
+    // Not applied anywhere: AGP 9 compiles Kotlin itself. Declared so that the Kotlin Gradle
+    // plugin on the build classpath has the same version as the serialization plugin.
+    alias(libs.plugins.kotlin.android) apply false
+    alias(libs.plugins.kotlin.serialization) apply false
+    alias(libs.plugins.rikka.refine) apply false
+    alias(libs.plugins.rikka.autoresconfig) apply false
+    alias(libs.plugins.rikka.materialthemebuilder) apply false
 }
 
 idea.module {
@@ -16,11 +23,18 @@ subprojects { subproject ->
             ndkVersion = "29.0.13113456"
             defaultConfig {
                 minSdk = 24
-                targetSdk = 37
             }
             compileOptions {
                 sourceCompatibility = JavaVersion.VERSION_21
                 targetCompatibility = JavaVersion.VERSION_21
+            }
+        }
+    }
+    // Libraries no longer have a target SDK
+    plugins.withId("com.android.application") {
+        android {
+            defaultConfig {
+                targetSdk = 37
             }
         }
     }

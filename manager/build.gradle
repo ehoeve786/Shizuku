@@ -1,14 +1,12 @@
-import java.nio.file.Paths
+import com.android.build.api.artifact.SingleArtifact
 import org.gradle.process.ExecOperations
-import com.android.build.gradle.internal.tasks.CompileArtProfileTask
 
 plugins {
-    id "com.android.application"
-    id "org.jetbrains.kotlin.android"
-    id "org.jetbrains.kotlin.plugin.serialization"
-    id "dev.rikka.tools.refine"
-    id "dev.rikka.tools.autoresconfig"
-    id "dev.rikka.tools.materialthemebuilder"
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.rikka.refine)
+    alias(libs.plugins.rikka.autoresconfig)
+    alias(libs.plugins.rikka.materialthemebuilder)
 }
 
 android {
@@ -19,7 +17,7 @@ android {
         versionName = rootProject.ext.versionName
         externalNativeBuild {
             cmake {
-                arguments = ["-DANDROID_STL=none"]
+                arguments "-DANDROID_STL=none"
             }
         }
     }
@@ -40,7 +38,7 @@ android {
             minifyEnabled = true
             shrinkResources = true
             vcsInfo.include = false
-            proguardFiles = ["proguard-rules.pro"]
+            proguardFiles "proguard-rules.pro"
         }
     }
     externalNativeBuild {
@@ -49,10 +47,7 @@ android {
             version = "3.31.0+"
         }
     }
-    kotlinOptions {
-        jvmTarget = "21"
-    }
-    packagingOptions {
+    packaging {
         jniLibs {
             useLegacyPackaging = true
         }
@@ -97,56 +92,73 @@ materialThemeBuilder {
 }
 
 def collapseReleaseResourceNames = tasks.register("collapseReleaseResourceNames") {
-    def aapt2 = Paths.get(project.android.sdkDirectory.path, "build-tools", project.android.buildToolsVersion, "aapt2")
-    def zip = Paths.get(project.buildDir.path, "intermediates",
-        "optimized_processed_res", "release", "optimizeReleaseResources", "resources-release-optimize.ap_")
+    def sdkDirectory = androidComponents.sdkComponents.sdkDirectory
+    def buildToolsVersion = android.buildToolsVersion
+    def zip = layout.buildDirectory.file(
+        "intermediates/optimized_processed_res/release/optimizeReleaseResources/resources-release-optimize.ap_")
+    def config = file("aapt2-resources.cfg")
+    def execOps = services.get(ExecOperations)
     doLast {
-        def optimized = new File("${zip}.opt")
-        def execOps = services.get(ExecOperations)
+        def aapt2 = new File(sdkDirectory.get().asFile, "build-tools/${buildToolsVersion}/aapt2")
+        def input = zip.get().asFile
+        def optimized = new File("${input}.opt")
         execOps.exec {
-            commandLine aapt2.toFile(), "optimize", "--collapse-resource-names",
-                "--resources-config-path", "aapt2-resources.cfg",
-                "-o", optimized, zip.toFile()
+            commandLine aapt2, "optimize", "--collapse-resource-names",
+                "--resources-config-path", config,
+                "-o", optimized, input
             ignoreExitValue = false
         }
         if (optimized.exists()) {
-            delete(zip.toFile())
-            optimized.renameTo(zip.toFile())
+            input.delete()
+            optimized.renameTo(input)
         }
     }
 }
 
-afterEvaluate {
-    tasks.getByName("optimizeReleaseResources").finalizedBy(collapseReleaseResourceNames)
-    tasks.getByName("preReleaseBuild").dependsOn(":shell:assembleRelease")
-    tasks.getByName("preDebugBuild").dependsOn(":shell:assembleDebug")
+tasks.matching { it.name == "optimizeReleaseResources" }.configureEach {
+    finalizedBy(collapseReleaseResourceNames)
 }
 
-android.applicationVariants.configureEach { variant ->
-    variant.outputs.configureEach {
-        outputFileName = "shizuku-v${variant.versionName}-${variant.name}.apk"
+// The rish dex is built by :shell and placed into this module's assets
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    dependsOn(":shell:extractReleaseRishDex")
+}
+tasks.matching { it.name == "preDebugBuild" }.configureEach {
+    dependsOn(":shell:extractDebugRishDex")
+}
 
-        variant.assembleProvider.get().doLast {
-            def outDir = new File(rootDir, "out")
-            def mappingDir = new File(outDir, "mapping").absolutePath
-            def apkDir = new File(outDir, "apk").absolutePath
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        def versionName = rootProject.ext.versionName
+        def variantName = variant.name
 
-            if (variant.getBuildType().isMinifyEnabled()) {
-                copy {
-                    from variant.mappingFileProvider.get()
-                    into mappingDir
-                    rename { String fileName -> "mapping-${variant.versionName}.txt" }
+        variant.outputs.each { output ->
+            output.outputFileName.set("shizuku-v${versionName}-${variantName}.apk")
+        }
+
+        // Collect the APK and its mapping file of minified builds in <root>/out
+        if (variant.buildType == "release") {
+            def taskSuffix = variantName.capitalize()
+            def copyOutputs = tasks.register("copy${taskSuffix}Outputs", Copy) {
+                from(variant.artifacts.get(SingleArtifact.APK.INSTANCE)) {
+                    include "*.apk"
+                    into "apk"
                 }
-                copy {
-                    from outputFile
-                    into apkDir
+                from(variant.artifacts.get(SingleArtifact.OBFUSCATION_MAPPING_FILE.INSTANCE)) {
+                    into "mapping"
+                    rename { "mapping-${versionName}.txt" }
                 }
+                into new File(rootDir, "out")
+            }
+            tasks.matching { it.name == "assemble${taskSuffix}" }.configureEach {
+                finalizedBy(copyOutputs)
             }
         }
     }
 }
 
-tasks.withType(CompileArtProfileTask.class).configureEach {
+// Baseline profiles are not shipped
+tasks.matching { it.name.startsWith("compile") && it.name.endsWith("ArtProfile") }.configureEach {
     enabled = false
 }
 configurations.configureEach {

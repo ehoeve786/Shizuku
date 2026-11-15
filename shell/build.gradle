@@ -1,6 +1,8 @@
+import com.android.build.api.artifact.SingleArtifact
+
 plugins {
-    id "com.android.application"
-    id "dev.rikka.tools.refine"
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.rikka.refine)
 }
 
 android {
@@ -16,7 +18,7 @@ android {
         }
         release {
             minifyEnabled = true
-            proguardFiles = ["proguard-rules.pro"]
+            proguardFiles "proguard-rules.pro"
         }
     }
     dependenciesInfo {
@@ -30,30 +32,41 @@ android {
     }
 }
 
-android.applicationVariants.all { variant ->
-    variant.outputs.all {
-        def outDir = new File(rootDir, "out")
-        def mappingPath = new File(outDir, "mapping").absolutePath
-        def dexPath = "${rootProject.rootDir.path}/manager/src/main/assets"
-        variant.assembleProvider.get().doLast {
-            if (variant.getBuildType().isMinifyEnabled()) {
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        def versionName = rootProject.ext.versionName
+        def taskSuffix = variant.name.capitalize()
+        def minified = variant.buildType == "release"
+        def apkDirectory = variant.artifacts.get(SingleArtifact.APK.INSTANCE)
+        def mappingFile = minified ? variant.artifacts.get(SingleArtifact.OBFUSCATION_MAPPING_FILE.INSTANCE) : null
+        def assetsDir = new File(rootProject.rootDir, "manager/src/main/assets")
+        def mappingDir = new File(rootProject.rootDir, "out/mapping")
+
+        // The manager ships this app's dex as an asset (used by rish). :manager depends on this
+        // task, see manager/build.gradle. No outputs are declared on purpose: the target is a
+        // source directory of another module.
+        def extractDex = tasks.register("extract${taskSuffix}RishDex") {
+            inputs.files(apkDirectory)
+            if (mappingFile != null) inputs.files(mappingFile)
+            doLast {
+                def apk = fileTree(apkDirectory.get().asFile).matching { include "*.apk" }.singleFile
+                def dex = zipTree(apk).matching { include "classes*.dex" }.singleFile
                 copy {
-                    from variant.mappingFileProvider.get()
-                    into mappingPath
-                    rename { String fileName ->
-                        mappingPath + File.separator + "cmd-v${variant.versionName}.txt"
+                    from dex
+                    into assetsDir
+                    rename { "rish_shizuku.dex" }
+                }
+                if (mappingFile != null) {
+                    copy {
+                        from mappingFile
+                        into mappingDir
+                        rename { "cmd-v${versionName}.txt" }
                     }
                 }
             }
-            copy {
-                def file = zipTree(file(outputFile)).matching { include "classes*.dex" }.singleFile
-
-                from file
-                into dexPath
-                rename { String fileName ->
-                    fileName.replace(file.getName(), "rish_shizuku.dex")
-                }
-            }
+        }
+        tasks.matching { it.name == "assemble${taskSuffix}" }.configureEach {
+            finalizedBy(extractDex)
         }
     }
 }
