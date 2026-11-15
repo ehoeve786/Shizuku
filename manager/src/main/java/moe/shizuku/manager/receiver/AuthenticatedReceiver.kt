@@ -6,10 +6,13 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import moe.shizuku.manager.MainActivity
 import moe.shizuku.manager.R
 import moe.shizuku.manager.ShizukuSettings
+import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicLong
 
 abstract class AuthenticatedReceiver : BroadcastReceiver() {
 
@@ -17,6 +20,8 @@ abstract class AuthenticatedReceiver : BroadcastReceiver() {
         private const val CHANNEL_ID = "auth_errors"
         private const val CHANNEL_NAME = "Authentication Errors"
         private const val NOTIFICATION_ID = 1450
+        private const val NOTIFICATION_INTERVAL_MS = 60_000L
+        private val lastNotificationTime = AtomicLong(0)
     }
 
     final override fun onReceive(context: Context, intent: Intent) {
@@ -24,18 +29,27 @@ abstract class AuthenticatedReceiver : BroadcastReceiver() {
         val expectedToken = ShizukuSettings.getAuthToken()
 
         if (authToken.isNullOrEmpty()) {
-            context.notify(
+            context.notifyRateLimited(
                 R.string.notification_auth_missing_title,
                 R.string.notification_auth_missing_message
             )
-        } else if (authToken != expectedToken) {
-            context.notify(
+        } else if (!MessageDigest.isEqual(authToken.toByteArray(), expectedToken.toByteArray())) {
+            context.notifyRateLimited(
                 R.string.notification_auth_invalid_title,
                 R.string.notification_auth_invalid_message
             )
         } else {
             onAuthenticated(context, intent)
         }
+    }
+
+    /** Any app can send these broadcasts, so do not let them flood the user with alerts. */
+    private fun Context.notifyRateLimited(title: Int, message: Int) {
+        val now = SystemClock.elapsedRealtime()
+        val last = lastNotificationTime.get()
+        if (last != 0L && now - last < NOTIFICATION_INTERVAL_MS) return
+        if (!lastNotificationTime.compareAndSet(last, now)) return
+        notify(title, message)
     }
 
     private fun Context.notify(title: Int, message: Int) {

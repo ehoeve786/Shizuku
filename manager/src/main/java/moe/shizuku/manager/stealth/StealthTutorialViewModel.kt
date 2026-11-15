@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import moe.shizuku.manager.R
+import moe.shizuku.manager.utils.ApkSigner
 import moe.shizuku.manager.utils.ApkUtils.*
 import java.io.File
 
@@ -80,8 +81,16 @@ class StealthTutorialViewModel(
                 val apk =
                     when (apkType) {
                         ApkType.CLONE -> {
+                            // The new app is installed from scratch and cannot receive the
+                            // signing key any other way, so this one APK has to carry it. The
+                            // clone offers to drop it again on first launch.
                             File(app.applicationInfo.sourceDir)
-                                .changePackageName(_packageName!!, maybeCreateSigningKey = true)
+                                .changePackageName(
+                                    _packageName!!,
+                                    embedSigningKey = true,
+                                    originCertDigest = ApkSigner.getOriginCertDigest(),
+                                    maybeCreateSigningKey = true
+                                )
                         }
                         ApkType.STUB -> createStubApk(ORIGINAL_PACKAGE_NAME)
                     }

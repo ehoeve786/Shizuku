@@ -138,13 +138,6 @@ class StealthTutorialActivity : AppBarActivity() {
         }
     }
 
-    override fun onDestroy() {
-        runCatching {
-            unregisterReceiver(installerReceiver)
-        }
-        super.onDestroy()
-    }
-
     private fun onClick(action: Action) {
         when (action) {
             Action.HIDE -> {
@@ -214,6 +207,7 @@ class StealthTutorialActivity : AppBarActivity() {
     }
 
     private fun handleInstallerResult(isSuccess: Boolean, msg: String?) {
+        if (isFinishing || isDestroyed) return
         viewModel.refresh()
         if (isSuccess) {
             Toast.makeText(

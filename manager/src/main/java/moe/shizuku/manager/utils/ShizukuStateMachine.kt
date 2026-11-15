@@ -33,33 +33,50 @@ object ShizukuStateMachine {
 
     fun get(): State = state.get()
 
-    private fun transition(transform: (State) -> State) {
-        val oldState = state.getAndUpdate(transform)
-        val newState = transform(oldState)
-        if(oldState != newState) {
+    /**
+     * Atomically applies [transform], which must be free of side effects because it can run
+     * more than once, and notifies the listeners if the state changed.
+     *
+     * @return the state before and after the transition
+     */
+    private fun transition(transform: (State) -> State): Pair<State, State> {
+        var oldState: State
+        var newState: State
+        do {
+            oldState = state.get()
+            newState = transform(oldState)
+        } while (!state.compareAndSet(oldState, newState))
+
+        if (oldState != newState) {
             listeners.forEach { it(newState) }
             Log.d("ShizukuStateMachine", newState.toString())
         }
+        return oldState to newState
     }
 
-    fun set(newState: State) = transition { newState }
+    fun set(newState: State) {
+        transition { newState }
+    }
 
-    fun setDead() = transition {
-        when (it) {
-            State.RUNNING -> State.CRASHED
-            State.STOPPING -> {
-                try {
-                    val permissionGranted = appContext.checkSelfPermission(WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
-                    val shouldDisableUsbDebugging = permissionGranted && ShizukuSettings.getAutoDisableUsbDebugging()
-                    if (shouldDisableUsbDebugging) {
-                        Settings.Global.putInt(appContext.contentResolver, Settings.Global.ADB_ENABLED, 0)
-                    }
-                } catch (e: Exception) {
-                    Log.w("ShizukuStateMachine", "Failed to disable USB debugging", e)
-                }
-                State.STOPPED
+    fun setDead() {
+        val (oldState, _) = transition {
+            when (it) {
+                State.RUNNING -> State.CRASHED
+                State.STOPPING -> State.STOPPED
+                else -> it
             }
-            else -> it
+        }
+
+        if (oldState == State.STOPPING) {
+            try {
+                val permissionGranted = appContext.checkSelfPermission(WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
+                val shouldDisableUsbDebugging = permissionGranted && ShizukuSettings.getAutoDisableUsbDebugging()
+                if (shouldDisableUsbDebugging) {
+                    Settings.Global.putInt(appContext.contentResolver, Settings.Global.ADB_ENABLED, 0)
+                }
+            } catch (e: Exception) {
+                Log.w("ShizukuStateMachine", "Failed to disable USB debugging", e)
+            }
         }
     }
 

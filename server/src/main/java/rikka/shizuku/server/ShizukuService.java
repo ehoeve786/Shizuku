@@ -46,6 +46,7 @@ import kotlin.collections.ArraysKt;
 import moe.shizuku.api.BinderContainer;
 import moe.shizuku.common.util.BuildUtils;
 import moe.shizuku.common.util.OsUtils;
+import moe.shizuku.server.BuildConfig;
 import moe.shizuku.server.IShizukuApplication;
 import rikka.hidden.compat.ActivityManagerApis;
 import rikka.hidden.compat.DeviceIdleControllerApis;
@@ -65,28 +66,40 @@ public class ShizukuService extends Service<ShizukuUserServiceManager, ShizukuCl
     public static final String MANAGER_APPLICATION_ID;
 
     static {
-        String packageName = null;
-        try {
-            String apk = System.getenv("CLASSPATH");
-
-            int lastSlash = apk.lastIndexOf(File.separatorChar);
-            String parentDir = apk.substring(0, lastSlash);
-
-            int secondLastSlash = parentDir.lastIndexOf(File.separatorChar);
-            String dirName = parentDir.substring(secondLastSlash + 1);
-
-            int dash = dirName.indexOf('-');
-            if (dash > 0) {
-                packageName = dirName.substring(0, dash);
-            } else {
-                packageName = dirName;
-            }
-
+        String packageName = parseManagerPackageName(System.getenv("CLASSPATH"));
+        if (packageName == null) {
+            // Not installed under /data/app/<package>-<suffix>/ (e.g. a system app): this can
+            // only be a regular, non-renamed install.
+            packageName = BuildConfig.MANAGER_APPLICATION_ID;
+            LOGGER.w("Couldn't get manager package name from CLASSPATH, using " + packageName);
+        } else {
             LOGGER.i("Manager package name is " + packageName);
-        } catch (Throwable tr) {
-            LOGGER.w("Couldn't get manager package name from CLASSPATH", tr);
         }
         MANAGER_APPLICATION_ID = packageName;
+    }
+
+    /**
+     * Derives the manager's package name from the path of its APK, which the system installs
+     * to {@code <...>/<package>-<suffix>/base.apk}. In stealth mode the package name is chosen
+     * by the user, so it cannot be a constant.
+     *
+     * @return the package name, or null if the path does not contain a valid one
+     */
+    @Nullable
+    static String parseManagerPackageName(@Nullable String apk) {
+        if (apk == null) return null;
+
+        int lastSlash = apk.lastIndexOf(File.separatorChar);
+        if (lastSlash <= 0) return null;
+        String parentDir = apk.substring(0, lastSlash);
+
+        String dirName = parentDir.substring(parentDir.lastIndexOf(File.separatorChar) + 1);
+        int dash = dirName.indexOf('-');
+        String packageName = dash > 0 ? dirName.substring(0, dash) : dirName;
+
+        // Same rules Android applies: at least two segments, each starting with a letter
+        if (!packageName.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")) return null;
+        return packageName;
     }
 
 

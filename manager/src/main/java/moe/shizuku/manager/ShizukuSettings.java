@@ -29,6 +29,7 @@ public class ShizukuSettings {
         public static final String KEY_TCP_MODE = "tcp_mode";
         public static final String KEY_TCP_PORT = "tcp_port";
         public static final String KEY_AUTO_DISABLE_USB_DEBUGGING = "auto_disable_usb_debugging";
+        public static final String KEY_KEEP_ADB_AUTHORIZATION = "keep_adb_authorization";
         public static final String KEY_LANGUAGE = "language";
         public static final String KEY_TRANSLATION = "translation";
         public static final String KEY_TRANSLATION_CONTRIBUTORS = "translation_contributors";
@@ -111,12 +112,34 @@ public class ShizukuSettings {
         return getPreferences().getBoolean(Keys.KEY_AUTO_DISABLE_USB_DEBUGGING, false);
     }
     
+    /**
+     * Whether Shizuku turns off the system's automatic revocation of ADB authorizations that
+     * have not been used for 7 days. Without this, start on boot and the watchdog stop working
+     * once Shizuku has been running for a week without reconnecting.
+     */
+    public static boolean getKeepAdbAuthorization() {
+        return getPreferences().getBoolean(Keys.KEY_KEEP_ADB_AUTHORIZATION, true);
+    }
+
     public static String getLastPromptedVersion() {
         return getPreferences().getString("lastPromptedVersion", "");
     }
 
     public static void setLastPromptedVersion(String version) {
         getPreferences().edit().putString("lastPromptedVersion", version).apply();
+    }
+
+    /**
+     * Certificate digest of the official builds, remembered by stealth installs that were
+     * created before the digest was recorded in the APK itself.
+     */
+    @Nullable
+    public static String getOriginCertDigest() {
+        return getPreferences().getString("origin_cert_sha256", null);
+    }
+
+    public static void setOriginCertDigest(String digest) {
+        getPreferences().edit().putString("origin_cert_sha256", digest).apply();
     }
 
     public static String getAuthToken() {
@@ -158,13 +181,12 @@ public class ShizukuSettings {
     }
 
     public static void setWatchdog(Context context, boolean enable) {
+        getPreferences().edit().putBoolean(Keys.KEY_WATCHDOG, enable).apply();
         if (enable) {
             WatchdogService.start(context);
         } else {
             WatchdogService.stop(context);
         }
-        getPreferences().edit().putBoolean(Keys.KEY_WATCHDOG, enable).apply();
-        return;
     }
 
     public static boolean getTcpMode() {

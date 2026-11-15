@@ -1,10 +1,8 @@
 package moe.shizuku.manager.utils.ApkUtils
 
 import android.app.PendingIntent
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageInstaller
 import android.os.Build
 import android.util.Log
@@ -19,8 +17,11 @@ import com.reandroid.archive.FileInputSource
 import com.reandroid.common.Namespace
 import moe.shizuku.manager.R
 import moe.shizuku.manager.ShizukuApplication
+import moe.shizuku.manager.receiver.InstallerResultReceiver
 import moe.shizuku.manager.utils.ApkSigner
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 private const val TAG = "ApkUtils"
 
@@ -36,7 +37,24 @@ val workDir by lazy {
     }
 }
 
-fun File.changePackageName(newPkgName: String, maybeCreateSigningKey: Boolean = false): File {
+private const val SIGNING_KEY_ENTRY = "assets/${ApkSigner.KEYSTORE_NAME}"
+private const val ORIGIN_CERT_ENTRY = "assets/${ApkSigner.ORIGIN_CERT_ASSET}"
+
+/**
+ * Rebuilds this APK under [newPkgName] and signs it with the local stealth signing key.
+ *
+ * @param embedSigningKey put the signing key into the new APK. This is only needed for the very
+ * first stealth APK, which is installed as a new app and has no other way to receive the key.
+ * Anyone who can read that APK can read the key, so later APKs must not carry it.
+ * @param originCertDigest SHA-256 of the certificate official builds are signed with, recorded
+ * in the new APK so that it can authenticate updates
+ */
+fun File.changePackageName(
+    newPkgName: String,
+    embedSigningKey: Boolean = false,
+    originCertDigest: String? = null,
+    maybeCreateSigningKey: Boolean = false
+): File {
     Log.i(TAG, "Loading APK")
     val module = ApkModule.loadApkFile(this)
     val manifest = module.androidManifest
@@ -60,14 +78,37 @@ fun File.changePackageName(newPkgName: String, maybeCreateSigningKey: Boolean = 
         }
     }
 
-    Log.i(TAG, "Inserting signing key")
-    val key = ApkSigner.getSigningKey(maybeCreateSigningKey)
-    val keystore = ApkSigner.keystoreFile
-    val keyInputSource = FileInputSource(keystore, "assets/${keystore.name}")
-    module.add(keyInputSource)
+    // Make sure the key is available (and created if allowed) before building
+    ApkSigner.getSigningKey(maybeCreateSigningKey)
+
+    module.removeInputSource(SIGNING_KEY_ENTRY)
+    if (embedSigningKey) {
+        Log.i(TAG, "Inserting signing key")
+        module.add(FileInputSource(ApkSigner.keystoreFile, SIGNING_KEY_ENTRY))
+    }
+
+    module.removeInputSource(ORIGIN_CERT_ENTRY)
+    if (originCertDigest != null) {
+        module.add(ByteInputSource(originCertDigest.toByteArray(Charsets.US_ASCII), ORIGIN_CERT_ENTRY))
+    }
 
     val outFile = File(workDir, "signed.apk")
     return module.buildAndSign(outFile)
+}
+
+/**
+ * Rebuilds the installed stealth APK without the embedded signing key, so that the key no longer
+ * sits in a file other apps can read. The result has to be installed over the current app.
+ */
+fun createApkWithoutEmbeddedKey(): File {
+    // Imports the embedded key into private storage if that has not happened yet
+    ApkSigner.getSigningKey()
+
+    return File(app.applicationInfo.sourceDir).changePackageName(
+        app.packageName,
+        embedSigningKey = false,
+        originCertDigest = ApkSigner.getOriginCertDigest()
+    )
 }
 
 fun createStubApk(pkgName: String): File {
@@ -115,6 +156,7 @@ private fun ApkModule.buildAndSign(
     maybeCreateSigningKey: Boolean = false
 ): File {
     Log.i(TAG, "Building new APK")
+    workDir.mkdirs()
     val unsignedApk = File(workDir, "unsigned.apk")
     writeApk(unsignedApk)
 
@@ -155,19 +197,21 @@ fun Context.installPackage(
 
     val sessionParams = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
     val sessionId = installer.createSession(sessionParams)
-    val session = installer.openSession(sessionId)
+    try {
+        installer.openSession(sessionId).use { session ->
+            apk.inputStream().use { input ->
+                session.openWrite("base.apk", 0, apk.length()).use { output ->
+                    input.copyTo(output)
+                    session.fsync(output)
+                }
+            }
 
-    apk.inputStream().use { input ->
-        session.openWrite("base.apk", 0, apk.length()).use { output ->
-            input.copyTo(output)
-            session.fsync(output)
+            session.commit(createInstallerPendingIntent(cb).intentSender)
         }
+    } catch (e: Exception) {
+        runCatching { installer.abandonSession(sessionId) }
+        throw e
     }
-
-    val pendingIntent = createInstallerPendingIntent(sessionId, cb)
-
-    session.commit(pendingIntent.intentSender)
-    session.close()
 }
 
 fun Context.uninstallPackage(
@@ -175,56 +219,30 @@ fun Context.uninstallPackage(
     cb: ((Boolean, String?) -> Unit)? = null,
 ) {
     val installer = appContext.packageManager.packageInstaller
-    val pendingIntent = createInstallerPendingIntent(0, cb)
-    installer.uninstall(pkgName, pendingIntent.intentSender)
+    installer.uninstall(pkgName, createInstallerPendingIntent(cb).intentSender)
 }
 
-private var callback: ((Boolean, String?) -> Unit)? = null
+private val nextRequestId = AtomicInteger(1)
+private val installerCallbacks = ConcurrentHashMap<Int, (Boolean, String?) -> Unit>()
 
-val installerReceiver =
-    object : BroadcastReceiver() {
-        override fun onReceive(
-            context: Context,
-            intent: Intent
-        ) {
-            val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
-            val msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
-
-            when (status) {
-                PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                    val confirmationIntent = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
-                    if (confirmationIntent != null) {
-                        context.startActivity(confirmationIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    }
-                }
-
-                else -> {
-                    val isSuccess = (status == PackageInstaller.STATUS_SUCCESS)
-                    callback?.invoke(isSuccess, msg)
-                    context.unregisterReceiver(this)
-                }
-            }
-        }
-    }
+/** Called by [InstallerResultReceiver] once the system reports a final result. */
+internal fun dispatchInstallerResult(requestId: Int, isSuccess: Boolean, msg: String?) {
+    installerCallbacks.remove(requestId)?.invoke(isSuccess, msg)
+}
 
 private fun Context.createInstallerPendingIntent(
-    sessionId: Int,
     cb: ((Boolean, String?) -> Unit)? = null
 ): PendingIntent {
-    callback = cb
+    val requestId = nextRequestId.getAndIncrement()
+    if (cb != null) installerCallbacks[requestId] = cb
 
-    val installerAction = "${app.packageName}.INSTALLER_RESULT"
-    val filter =
-        IntentFilter().apply {
-            addAction(installerAction)
-        }
-    registerReceiver(installerReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-
+    // Explicit intent to a receiver that is not exported: the result (which may carry an intent
+    // that this app then starts) can only come from the system, never from another app.
     val callbackIntent =
-        Intent(installerAction).apply {
-            setPackage(app.packageName)
-        }
+        Intent(appContext, InstallerResultReceiver::class.java)
+            .putExtra(InstallerResultReceiver.EXTRA_REQUEST_ID, requestId)
 
+    // The system has to add the result extras, so the PendingIntent must be mutable
     val flags =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
@@ -233,8 +251,8 @@ private fun Context.createInstallerPendingIntent(
         }
 
     return PendingIntent.getBroadcast(
-        this,
-        sessionId,
+        appContext,
+        requestId,
         callbackIntent,
         flags,
     )

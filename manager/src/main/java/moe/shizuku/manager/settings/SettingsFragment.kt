@@ -177,6 +177,12 @@ class SettingsFragment : PreferenceFragmentCompat(), SharedPreferences.OnSharedP
             }
         }
 
+        findPreference<TwoStatePreference>(KEY_KEEP_ADB_AUTHORIZATION)?.setOnPreferenceChangeListener { _, newValue ->
+            // Turning it on takes effect the next time Shizuku starts over ADB
+            if (newValue == false) SettingsHelper.restoreAdbAuthorizationExpiry(context)
+            true
+        }
+
         tcpModePreference.apply {
             if (EnvironmentUtils.isTlsSupported()) {
                 summary = context.getString(R.string.settings_tcp_mode_summary)

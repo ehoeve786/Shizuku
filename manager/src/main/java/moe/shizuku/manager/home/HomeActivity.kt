@@ -28,6 +28,7 @@ import moe.shizuku.manager.home.showAccessibilityDialog
 import moe.shizuku.manager.ktx.toHtml
 import moe.shizuku.manager.management.AppsViewModel
 import moe.shizuku.manager.settings.SettingsActivity
+import moe.shizuku.manager.utils.ApkSigner
 import moe.shizuku.manager.utils.AppIconCache
 import moe.shizuku.manager.utils.CustomTabsHelper
 import moe.shizuku.manager.utils.EnvironmentUtils
@@ -103,7 +104,22 @@ abstract class HomeActivity : AppBarActivity() {
         }
 
         lifecycleScope.launch {
-            if (UpdateHelper.isCheckForUpdatesEnabled() && UpdateHelper.isNewUpdateAvailable()) {
+            if (ApkSigner.hasEmbeddedKey()) {
+                // A freshly installed stealth APK has to carry its signing key. Other apps can
+                // read installed APKs, so offer to reinstall without it.
+                SnackbarHelper.show(
+                    this@HomeActivity,
+                    binding.root,
+                    msg = getString(R.string.snackbar_embedded_signing_key),
+                    duration = Snackbar.LENGTH_INDEFINITE,
+                    actionText = getString(R.string.snackbar_action_fix),
+                    action = {
+                        lifecycleScope.launch {
+                            UpdateHelper.removeEmbeddedSigningKey()
+                        }
+                    }
+                )
+            } else if (UpdateHelper.isCheckForUpdatesEnabled() && UpdateHelper.isNewUpdateAvailable()) {
                 SnackbarHelper.show(
                     this@HomeActivity,
                     binding.root,

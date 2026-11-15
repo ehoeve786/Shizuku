@@ -32,10 +32,10 @@ class BugReportDialog : DialogFragment() {
             .asLink("https://github.com/thedjchi/Shizuku/releases/latest")
 
         val wikiLink = getString(R.string.bug_report_dialog_link_wiki)
-            .asLink("https://github.com/thedjchi/Shizuku/releases/wiki#troubleshooting")
+            .asLink("https://github.com/thedjchi/Shizuku/wiki#troubleshooting")
 
         val issuesLink = getString(R.string.bug_report_dialog_link_issues)
-            .asLink("https://github.com/thedjchi/Shizuku/releases/issues")
+            .asLink("https://github.com/thedjchi/Shizuku/issues")
 
         binding.apply {
             updateText.applyTemplateArgs(updateLink)

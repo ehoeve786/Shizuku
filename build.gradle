@@ -31,5 +31,7 @@ def baseVersionName = "13.7.0"
 def isBeta = project.hasProperty("beta")
 ext {
     versionCode = gitCommitCount
-    versionName = "${baseVersionName}${if (isBeta) "-beta" else ""}-thedjchi"
+    // Betas carry the commit count so that successive betas of one base version get distinct,
+    // ordered version names (and release tags), e.g. 13.7.0.r1520-beta-thedjchi
+    versionName = "${baseVersionName}${if (isBeta) ".r${gitCommitCount}-beta" else ""}-thedjchi"
 }

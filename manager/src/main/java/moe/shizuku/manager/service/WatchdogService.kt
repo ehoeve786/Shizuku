@@ -24,6 +24,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class WatchdogService : Service() {
 
+    private var stoppedByUser = false
+
     private val stateListener: (ShizukuStateMachine.State) -> Unit = {
         if (it == ShizukuStateMachine.State.CRASHED) {
             showCrashNotification()
@@ -39,6 +41,7 @@ class WatchdogService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "ACTION_STOP_SERVICE") {
+            stoppedByUser = true
             stopSelf()
             return START_NOT_STICKY
         }
@@ -60,7 +63,13 @@ class WatchdogService : Service() {
     override fun onDestroy() {
         ShizukuStateMachine.removeListener(stateListener)
         isRunning.set(false)
-        ShizukuSettings.setWatchdog(applicationContext, false)
+        // Only the "Turn Off" notification action changes the setting. Any other teardown
+        // (e.g. the system stopping the service) must leave the user's choice alone.
+        if (stoppedByUser) {
+            ShizukuSettings.getPreferences().edit()
+                .putBoolean(ShizukuSettings.Keys.KEY_WATCHDOG, false)
+                .apply()
+        }
         super.onDestroy()
     }
 

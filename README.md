@@ -72,12 +72,15 @@ Shizuku takes user privacy very seriously.
 
 * **INTERNET:** required for the wireless debugging start mode to work. Also used to fetch updates from GitHub
 * **ACCESS_NETWORK_STATE:** used to determine when Wi-Fi is available for background start via wireless debugging
+* **ACCESS_LOCAL_NETWORK, USE_LOOPBACK_INTERFACE, NEARBY_WIFI_DEVICES, CHANGE_WIFI_MULTICAST_STATE:** required on newer Android versions to discover (mDNS) and connect to the device's own wireless debugging service
 * **POST_NOTIFICATIONS:** required for pairing notification and other alerts
 * **RECEIVE_BOOT_COMPLETED:** required for start on boot
-* **FOREGROUND_SERVICE:** prevents watchdog from being killed
+* **FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE:** prevents watchdog from being killed
 * **REQUEST_IGNORE_BATTERY_OPTIMIZATIONS:** prevents start on boot and watchdog services from being killed
-* **WRITE_SECURE_SETTINGS:** used to toggle USB and wireless debugging in the background when starting/stopping Shizuku
+* **WRITE_SECURE_SETTINGS:** used to toggle USB and wireless debugging in the background when starting/stopping Shizuku. With "Keep ADB authorization" enabled (default), also used to stop Android from revoking ADB authorizations that were unused for 7 days
+* **REQUEST_INSTALL_PACKAGES:** used to install in-app updates and the stub app when using stealth mode
 * **REQUEST_DELETE_PACKAGES:** used to request uninstall for Shizuku/stub when using stealth mode
+* **Accessibility service (opt-in, Android TV only):** reads the pairing code from the TV settings screen during wireless debugging pairing, then turns itself off
 * **REQUEST_INSTALL_PACKAGES:** used to request install for app updates, as well as Shizuku stub when using stealth mode
 
 ## 🌎 Translations

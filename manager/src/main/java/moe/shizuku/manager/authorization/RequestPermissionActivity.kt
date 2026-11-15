@@ -7,9 +7,10 @@ import android.os.Bundle
 import android.text.method.LinkMovementMethod
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 import moe.shizuku.manager.Helps
@@ -64,28 +65,32 @@ class RequestPermissionActivity : AppActivity() {
         return false
     }
 
-    private fun waitForBinder(): Boolean {
-        return runBlocking {
-            try { 
-                withTimeout(5000) {
-                    ShizukuStateMachine.asFlow().first { it == ShizukuStateMachine.State.RUNNING }
-                }
-                true
-            } catch (e: TimeoutCancellationException) {
-                LOGGER.e(e, "Binder not received in 5s")
-                false
+    private suspend fun waitForBinder(): Boolean =
+        try {
+            withTimeout(5000) {
+                ShizukuStateMachine.asFlow().first { it == ShizukuStateMachine.State.RUNNING }
             }
+            true
+        } catch (e: TimeoutCancellationException) {
+            LOGGER.e(e, "Binder not received in 5s")
+            false
         }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        if (!waitForBinder()) {
-            finish()
-            return
+        // The binder arrives through a callback on the main thread, so waiting for it must not
+        // block the main thread.
+        lifecycleScope.launch {
+            if (waitForBinder()) {
+                showConfirmation()
+            } else {
+                finish()
+            }
         }
+    }
 
+    private fun showConfirmation() {
         val uid = intent.getIntExtra("uid", -1)
         val pid = intent.getIntExtra("pid", -1)
         val requestCode = intent.getIntExtra("requestCode", -1)

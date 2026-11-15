@@ -1,5 +1,6 @@
 package moe.shizuku.manager.worker
 
+import moe.shizuku.manager.utils.SettingsHelper
 import android.app.KeyguardManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -51,7 +52,7 @@ class AdbStartWorker(context: Context, params: WorkerParameters) : CoroutineWork
             val cr = applicationContext.contentResolver
 
             Settings.Global.putInt(cr, Settings.Global.ADB_ENABLED, 1)
-            Settings.Global.putLong(cr, "adb_allowed_connection_time", 0L)
+            SettingsHelper.keepAdbAuthorizationIfEnabled(applicationContext)
 
             val tcpPort = EnvironmentUtils.getAdbTcpPort()
             if (tcpPort > 0 && !ShizukuSettings.getTcpMode()) {

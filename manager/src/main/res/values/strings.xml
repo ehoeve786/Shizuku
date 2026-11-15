@@ -161,7 +161,9 @@
     <string name="settings_watchdog">Watchdog</string>
     <string name="settings_watchdog_summary">Automatically restart Shizuku if it crashes</string>
     <string name="settings_tcp_mode">TCP mode</string>
-    <string name="settings_tcp_mode_summary">"Allows Shizuku to restart without Wi-Fi. (Shizuku must have started once since reboot)"</string>
+    <string name="settings_keep_adb_authorization">Keep ADB authorization</string>
+    <string name="settings_keep_adb_authorization_summary">Stops Android from revoking ADB authorizations that were not used for 7 days. This applies to every authorized computer, not only Shizuku. If turned off, Shizuku may need to be paired again after running for a week without a restart.</string>
+    <string name="settings_tcp_mode_summary">"Allows Shizuku to restart without Wi-Fi. (Shizuku must have started once since reboot.) While enabled, ADB keeps listening on the TCP port on every network; connections still require an authorized key."</string>
     <string name="settings_tcp_mode_dialog_close_port">"The TCP port will be closed immediately. You will need Wi-Fi to turn on TCP mode again. Continue?"</string>
     <string name="settings_tcp_mode_closing_port">Closing TCP port...</string>
     <string name="settings_restart_dialog_title">Restart Required</string>
@@ -207,6 +209,7 @@
     <string name="snackbar_action_fix">Fix</string>
     <string name="snackbar_update_available">A new update is available</string>
     <string name="snackbar_action_update">Update</string>
+    <string name="snackbar_embedded_signing_key">Finish stealth setup: reinstall to remove the signing key from the installed app, where other apps could read it.</string>
 
     <!-- Updates -->
     <string name="check_for_updates">Check for updates</string>

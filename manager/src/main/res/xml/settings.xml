@@ -32,6 +32,12 @@
             android:inputType="number" />
 
         <SwitchPreferenceCompat
+            android:key="keep_adb_authorization"
+            android:title="@string/settings_keep_adb_authorization"
+            android:summary="@string/settings_keep_adb_authorization_summary"
+            android:defaultValue="true" />
+
+        <SwitchPreferenceCompat
             android:key="auto_disable_usb_debugging"
             android:title="@string/settings_auto_disable_usb_debugging"
             android:summary="@string/settings_auto_disable_usb_debugging_summary" />

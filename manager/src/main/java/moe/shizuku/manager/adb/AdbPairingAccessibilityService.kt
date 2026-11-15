@@ -20,10 +20,13 @@ import moe.shizuku.manager.adb.AdbKey
 import moe.shizuku.manager.adb.AdbPairingClient
 import moe.shizuku.manager.home.HomeActivity
 import moe.shizuku.manager.utils.EnvironmentUtils
+import android.os.Build
 import java.net.ConnectException
+import java.net.SocketException
 
 class AdbPairingAccessibilityService : AccessibilityService() {
 
+    var host: String? = null
     var port: Int? = null
     var password: String? = null
 
@@ -61,14 +64,15 @@ class AdbPairingAccessibilityService : AccessibilityService() {
         if ((event.contentChangeTypes and AccessibilityEvent.CONTENT_CHANGE_TYPE_TEXT) == 0) return
         val text = event.source?.text ?: return
 
-        val ipPortRegex = Regex("""(?:\d{1,3}\.){3}\d{1,3}:(\d{2,5})""")
+        val ipPortRegex = Regex("""((?:\d{1,3}\.){3}\d{1,3}):(\d{2,5})""")
         val passwordRegex = Regex("""\d{6}""")
 
-        ipPortRegex.matchEntire(text)
-            ?.groupValues
-            ?.get(1)
-            ?.toIntOrNull()
-            ?.let { port = it }
+        ipPortRegex.matchEntire(text)?.let { match ->
+            match.groupValues[2].toIntOrNull()?.let {
+                host = match.groupValues[1]
+                port = it
+            }
+        }
         passwordRegex.matchEntire(text)
             ?.value
             ?.let { password = it }
@@ -78,32 +82,47 @@ class AdbPairingAccessibilityService : AccessibilityService() {
             val password = password!!
 
             var toastMsg = getString(R.string.notification_adb_pairing_failed_title)
-            GlobalScope.launch(Dispatchers.IO) {
-                val host = "127.0.0.1"
+            // Android 17 restricts loopback connections, so prefer the address shown on screen
+            // there. Older versions are known to work over loopback.
+            val loopback = "127.0.0.1"
+            val hosts =
+                (if (Build.VERSION.SDK_INT >= 37) listOf(host, loopback) else listOf(loopback, host))
+                    .filterNotNull()
+                    .distinct()
 
+            GlobalScope.launch(Dispatchers.IO) {
                 val key = try {
                     AdbKey(PreferenceAdbKeyStore(ShizukuSettings.getPreferences()), "shizuku")
                 } catch (e: Throwable) {
                     toastMsg = getString(R.string.adb_error_key_store)
-                    return@launch
+                    null
                 }
 
-                AdbPairingClient(host, port, password, key).runCatching {
-                    start()
-                }.onFailure {
-                    when (it) {
-                        is ConnectException -> toastMsg = getString(R.string.cannot_connect_port)
-                        is AdbInvalidPairingCodeException -> toastMsg = getString(R.string.paring_code_is_wrong)
-                        is AdbKeyException -> toastMsg = getString(R.string.adb_error_key_store)
-                    }
-                }.onSuccess {
-                    if (it) {
-                        toastMsg = "${getString(R.string.notification_adb_pairing_succeed_title)}. ${getString(R.string.notification_adb_pairing_succeed_text)}"
-                   
-                        val intent = Intent(this@AdbPairingAccessibilityService, MainActivity::class.java).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                if (key != null) {
+                    var result: Result<Boolean> = Result.failure(ConnectException())
+                    for (candidate in hosts) {
+                        result = AdbPairingClient(candidate, port, password, key).runCatching {
+                            start()
                         }
-                        startActivity(intent)
+                        // Only try the next address if this one could not be reached
+                        if (result.exceptionOrNull() !is SocketException) break
+                    }
+
+                    result.onFailure {
+                        when (it) {
+                            is SocketException -> toastMsg = getString(R.string.cannot_connect_port)
+                            is AdbInvalidPairingCodeException -> toastMsg = getString(R.string.paring_code_is_wrong)
+                            is AdbKeyException -> toastMsg = getString(R.string.adb_error_key_store)
+                        }
+                    }.onSuccess {
+                        if (it) {
+                            toastMsg = "${getString(R.string.notification_adb_pairing_succeed_title)}. ${getString(R.string.notification_adb_pairing_succeed_text)}"
+
+                            val intent = Intent(this@AdbPairingAccessibilityService, MainActivity::class.java).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                            }
+                            startActivity(intent)
+                        }
                     }
                 }
                 withContext(Dispatchers.Main) {
