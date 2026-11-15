@@ -1,7 +1,8 @@
-name: Build Debug APK
+name: Build APKs
 
-# Builds the pushed commit so that every branch gets a compile check and an installable APK.
-# Release builds are made by app.yml.
+# Builds the pushed commit so that every branch gets a compile check and installable APKs.
+# The release variant is built too because it runs R8 and the release-only build steps; without
+# signing secrets it is signed with the debug key. Published releases are made by app.yml.
 on:
   push:
     branches:
@@ -38,11 +39,18 @@ jobs:
       - name: Build with Gradle
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
-          ./gradlew :manager:assembleDebug
+          ./gradlew :manager:assembleDebug :manager:assembleRelease
 
-      - name: Upload APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v6
         with:
           name: shizuku-debug-${{ github.sha }}
           path: manager/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload release APK (debug-signed)
+        uses: actions/upload-artifact@v6
+        with:
+          name: shizuku-release-debugsigned-${{ github.sha }}
+          path: manager/build/outputs/apk/release/*.apk
           if-no-files-found: error
